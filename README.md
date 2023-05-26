@@ -8,7 +8,7 @@ This code has been adapted from Copyright (c) 2018, Tatsuro Yamada <<yamadat@idr
 
 Original repository: https://github.com/ogata-lab/PRAE/
 
-Copyright (c) 2022, Ozan Özdemir <<ozan.oezdemir@uni-hamburg.de>>
+Copyright (c) 2023, Ozan Özdemir <<ozan.oezdemir@uni-hamburg.de>>
 
 ## Requirements
 - Python 3
@@ -22,7 +22,7 @@ Paired Transformed Autoencoders - Pytorch Implementation
 ## Example
 ```
 $ cd src
-$ python learn.py
+$ python main_ptae.py
 ```
 - main_ptae.py: trains the PTAE model
 - ptae.py: defines the PTAE architecture
