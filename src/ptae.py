@@ -3,7 +3,7 @@ from torch import nn
 import math
 
 
-def train(model, batch, optimiser, epoch_loss, params, vis_out = False, appriori_len = True):
+def train(model, batch, optimiser, epoch_loss, params, vis_out=False, appriori_len=True):
     optimiser.zero_grad()  # free the optimiser from previous gradients
     gt_description = batch['L_fw'][1:]
     if vis_out:
@@ -157,6 +157,164 @@ def validate(model, batch, epoch_loss, params, vis_out=False, appriori_len = Tru
         epoch_loss.append(batch_loss.item())  # record the batch loss
 
     return L_loss, B_loss, batch_loss, signal # return the losses
+
+def train_unimodal(model, batch, optimiser, epoch_loss, params, unimodal_ratio, vis_out = False):
+    optimiser.zero_grad()  # free the optimizer from previous gradients
+    gt_description = batch['L_fw'][1:]
+    if vis_out:
+        gt_action = torch.cat((batch['V_fw'][1:],batch['B_fw'][1:]), dim=-1)
+    else:
+        gt_action = batch['B_fw'][1:]
+    ran_sig = torch.randint(100, (1,))#torch.randint(3, (1,))
+    if ran_sig < unimodal_ratio:  # if ran_sig == 0:
+        rep_sig = torch.randint(2, (1,))  # torch.randint(3, (1,))
+        if rep_sig == 0:
+            signal = 'repeat action'
+            gt_description = gt_description[-1].unsqueeze(0)
+        # elif rep_sig == 1:
+        # signal = 'repeat both'
+        else:
+            signal = 'repeat language'
+            if vis_out:
+                gt_action = torch.cat((batch['V_fw'][0].repeat(len(gt_action), 1, 1) *
+                                       batch["B_bin"][1:].repeat(1, 1, int(batch["V_fw"].shape[-1] / batch["B_bin"].shape[-1])),
+                                       batch['B_fw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]), dim=-1)
+            else:
+                gt_action = batch['B_fw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]
+    else:  # ran_sig < 94:#1:
+        supervised_sig = torch.randint(2, (1,))  # torch.randint(3, (1,))
+        if supervised_sig == 0:
+            signal = 'describe'
+            if vis_out:
+                gt_action = torch.cat((batch['V_bw'][0].repeat(len(gt_action), 1, 1) *
+                                       batch["B_bin"][1:].repeat(1, 1, int(batch["V_bw"].shape[-1] / batch["B_bin"].shape[-1])),
+                                       batch['B_bw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]), dim=-1)
+            else:
+                gt_action = batch['B_bw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]
+        elif supervised_sig == 1:
+            signal = 'execute'
+            gt_description = gt_description[-1].unsqueeze(0)
+        #else:
+            #signal = 'repeat both'
+    output = model(batch, signal)
+    L_loss, B_loss, batch_loss = loss(output, gt_description, gt_action, batch["B_bin"], signal, params, vis_out)  # compute loss
+    batch_loss.backward()  # compute gradients
+    optimiser.step()  # update weights
+    epoch_loss.append(batch_loss.item())  # record the batch loss
+    #scheduler.step()
+
+    return L_loss, B_loss, batch_loss, signal  # return the losses
+
+def validate_unimodal(model, batch, epoch_loss, params, unimodal_ratio, vis_out=False):
+    with torch.no_grad():
+        gt_description = batch['L_fw'][1:]
+        if vis_out:
+            gt_action = torch.cat((batch['V_fw'][1:], batch['B_fw'][1:]), dim=-1)
+        else:
+            gt_action = batch['B_fw'][1:]
+        ran_sig = torch.randint(100, (1,))#torch.randint(3, (1,))
+        if ran_sig < unimodal_ratio:#if ran_sig == 0:
+            rep_sig = torch.randint(2, (1,))#torch.randint(3, (1,))
+            if rep_sig == 0:
+                signal = 'repeat action'
+                gt_description = gt_description[-1].unsqueeze(0)
+            #elif rep_sig == 1:
+                #signal = 'repeat both'
+            else:
+                signal = 'repeat language'
+                if vis_out:
+                    gt_action = torch.cat((batch['V_fw'][0].repeat(len(gt_action), 1, 1) *
+                                           batch["B_bin"][1:].repeat(1, 1, int(batch["V_fw"].shape[-1] / batch["B_bin"].shape[-1])),
+                                           batch['B_fw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]), dim=-1)
+                else:
+                    gt_action = batch['B_fw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]
+        else: #ran_sig < 94:#1:
+            supervised_sig = torch.randint(2, (1,))  # torch.randint(3, (1,))
+            if supervised_sig == 0:
+                signal = 'describe'
+                if vis_out:
+                    gt_action = torch.cat((batch['V_bw'][0].repeat(len(gt_action), 1, 1) *
+                                           batch["B_bin"][1:].repeat(1, 1, int(batch["V_bw"].shape[-1] / batch["B_bin"].shape[-1])),
+                                           batch['B_bw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]), dim=-1)
+                else:
+                    gt_action = batch['B_bw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]
+            elif supervised_sig == 1:
+                signal = 'execute'
+                gt_description = gt_description[-1].unsqueeze(0)
+            #else:
+                #signal = 'repeat both'
+        output = model(batch, signal)
+        L_loss, B_loss, batch_loss = loss(output, gt_description, gt_action, batch["B_bin"], signal, params, vis_out)  # compute loss
+        epoch_loss.append(batch_loss.item())  # record the batch loss
+
+    return L_loss, B_loss, batch_loss, signal # return the losses
+
+def train_limited_data(model, batch, optimiser, epoch_loss, params, signal, vis_out = False, appriori_len=True):
+    optimiser.zero_grad()  # free the optimizer from previous gradients
+    gt_description = batch['L_fw'][1:]
+    if vis_out:
+        gt_action = torch.cat((batch['V_fw'][1:],batch['B_fw'][1:]), dim=-1)
+    else:
+        gt_action = batch['B_fw'][1:]
+    if signal == 'repeat action':
+        if appriori_len:
+            gt_description = gt_description[-1].unsqueeze(0)
+        else:
+            gt_description = torch.zeros((1, gt_description.shape[1], gt_description.shape[2])).cuda()
+            gt_description[:, :, 1] = 1
+        gt_description = gt_description[-1].unsqueeze(0)
+        # elif rep_sig == 1:
+        # signal = 'repeat both'
+    elif signal == 'repeat language':
+        if vis_out:
+            if appriori_len == True:
+                gt_action = torch.cat((batch['V_fw'][0].repeat(len(gt_action), 1, 1) *
+                                       batch["B_bin"][1:].repeat(1, 1, int(batch["V_fw"].shape[-1] / batch["B_bin"].shape[-1])),
+                                       batch['B_fw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]), dim=-1)
+            else:
+                gt_action = torch.cat((batch['V_fw'][0].repeat(len(gt_action), 1, 1) *
+                                       batch["B_bin"][1:].repeat(1, 1, int(
+                                           batch["V_fw"].shape[-1] / batch["B_bin"].shape[-1])),
+                                       torch.cat((batch['B_fw'][0].repeat(len(gt_action), 1, 1)[:, :, :-1] * batch["B_bin"][1:],
+                                                  batch['B_fw'][1:, :, -1].unsqueeze(-1)), -1)), dim=-1)
+        else:
+            if appriori_len == True:
+                gt_action = batch['B_fw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]
+            else:
+                gt_action = torch.cat((batch['B_fw'][0].repeat(len(gt_action), 1, 1)[:, :, :-1] * batch["B_bin"][1:],
+                                       batch['B_fw'][1:, :, -1].unsqueeze(-1)), -1)
+    elif signal == 'describe':
+        if vis_out:
+            if appriori_len == True:
+                gt_action = torch.cat((batch['V_bw'][0].repeat(len(gt_action), 1, 1) *
+                                        batch["B_bin"][1:].repeat(1, 1, int(batch["V_bw"].shape[-1] / batch["B_bin"].shape[-1])),
+                                        batch['B_bw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]), dim=-1)
+            else:
+                gt_action = torch.cat((batch['V_bw'][0].repeat(len(gt_action), 1, 1) *
+                                        batch["B_bin"][1:].repeat(1, 1, int(batch["V_bw"].shape[-1] / batch["B_bin"].shape[-1])),
+                                       torch.cat((batch['B_bw'][0].repeat(len(gt_action), 1, 1)[:, :, :-1] * batch["B_bin"][1:],
+                                                  batch['B_bw'][1:, :, -1].unsqueeze(-1)), -1)), dim=-1)
+        else:
+            if appriori_len == True:
+                gt_action = batch['B_bw'][0].repeat(len(gt_action), 1, 1) * batch["B_bin"][1:]
+            else:
+                gt_action = torch.cat((batch['B_bw'][0].repeat(len(gt_action), 1, 1)[:, :, :-1] * batch["B_bin"][1:],
+                                       batch['B_bw'][1:, :, -1].unsqueeze(-1)), -1)
+    elif signal == 'execute':
+        if appriori_len:
+            gt_description = gt_description[-1].unsqueeze(0)
+        else:
+            gt_description = torch.zeros((1, gt_description.shape[1], gt_description.shape[2])).cuda()
+            gt_description[:, :, 1] = 1
+
+    output = model(batch, signal, appriori_len)
+    L_loss, B_loss, batch_loss = loss(output, gt_description, gt_action, batch["B_bin"], signal, params, vis_out,appriori_len)  # compute loss
+    batch_loss.backward()  # compute gradients
+    optimiser.step()  # update weights
+    epoch_loss.append(batch_loss.item())  # record the batch loss
+    #scheduler.step()
+
+    return L_loss, B_loss, batch_loss, signal  # return the losses
 
 
 def loss(output, gt_description, gt_action, B_bin, signal, net_conf, vis_out=False, fix_seq_len=True):
@@ -476,141 +634,6 @@ class LanguageModel(nn.Module):
         token_embeddings = model_output[0]  # First element of model_output contains all token embeddings
         input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
         return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-
-class ResNetFeatExtractor(nn.Module):
-    def __init__(self, layers=34, max_seq_len=100):
-        super(ResNetFeatExtractor, self).__init__()
-        from torchvision import models
-        import ssl
-        try:
-            _create_unverified_https_context = ssl._create_unverified_context
-        except AttributeError:
-            # Legacy Python that doesn't verify HTTPS certificates by default
-            pass
-        else:
-            # Handle target environment that doesn't support HTTPS verification
-            ssl._create_default_https_context = _create_unverified_https_context
-        if layers == 34:
-            res34 = models.resnet34(weights=True)
-            self.resnet = torch.nn.Sequential(*(list(res34.children())[:-3]))
-        else:
-            res18 = models.resnet18(weights=True)
-            self.resnet = torch.nn.Sequential(*(list(res18.children())[:-3]))
-        for param in self.resnet.parameters():
-            param.requires_grad = False
-        self.dropout = nn.Dropout(p=0.10)
-        self.firstconv = nn.Conv2d(256, 128, 3, padding=1)
-        self.elu = nn.ELU()
-        self.secondconv = nn.Conv2d(128, 128, 3, padding=1)
-        self.linear = nn.Linear(128*8*8, 512)#nn.Linear(128*8*10, 512)#nn.Linear(128*14*14, 512)
-        self.linear_s = nn.Linear(512, 30)
-        self.tanh = nn.Tanh()
-        self.max_seq_len = max_seq_len
-
-    def forward(self, inp, static=False, rtn_last=False):#(self, inp, backward=False):
-        #self.resnet.eval()
-        extracted_features = []
-        if rtn_last:
-            last_image_features = []
-        for i in range(0, len(inp)):
-            with torch.no_grad():
-                resnet_features = self.resnet(inp[i])#'.squeeze()
-            feats = self.dropout(resnet_features)
-            feats = self.firstconv(feats)
-            feats = self.elu(feats)
-            feats = self.dropout(feats)
-            feats = self.secondconv(feats)
-            feats = self.elu(feats)
-            feats = torch.flatten(feats, start_dim=1)
-            feats = self.linear(feats)
-            feats = self.linear_s(feats)
-            extracted_feature = self.tanh(feats)
-            if rtn_last:
-                last_image_features.append(extracted_feature[-1].unsqueeze(0))
-            if static == False:
-                if len(extracted_feature) < self.max_seq_len:
-                    extracted_feature = torch.nn.functional.pad(input=extracted_feature, pad=(0, 0, 0, self.max_seq_len-len(extracted_feature)), mode='constant',
-                                               value=0)
-            extracted_features.append(extracted_feature.unsqueeze(0))
-        extracted_features = torch.cat(extracted_features)
-        if rtn_last:
-            last_image_features = torch.cat(last_image_features)
-            return [extracted_features, last_image_features]
-        return extracted_features
-
-class EfficientNetFeatExtractor(nn.Module):
-    def __init__(self, variant='b0', max_seq_len=100):
-        super(EfficientNetFeatExtractor, self).__init__()
-        from torchvision import models
-        import ssl
-        try:
-            _create_unverified_https_context = ssl._create_unverified_context
-        except AttributeError:
-            # Legacy Python that doesn't verify HTTPS certificates by default
-            pass
-        else:
-            # Handle target environment that doesn't support HTTPS verification
-            ssl._create_default_https_context = _create_unverified_https_context
-
-        if variant =='b0':
-            efficientnet_b0 = models.efficientnet_b0(weights='EfficientNet_B0_Weights.IMAGENET1K_V1')
-            self.efficientnet = torch.nn.Sequential(*(list(torch.nn.Sequential(*(list(efficientnet_b0.children())[:-2]))[0].children())[:-1]))
-        elif variant == 'b1':
-            efficientnet_b1 = models.efficientnet_b1(weights='EfficientNet_B1_Weights.IMAGENET1K_V1')
-            self.efficientnet = torch.nn.Sequential(*(list(torch.nn.Sequential(*(list(efficientnet_b1.children())[:-2]))[0].children())[:-1]))
-        elif variant == 'b2':
-            efficientnet_b2 = models.efficientnet_b2(weights='EfficientNet_B2_Weights.IMAGENET1K_V1')
-            self.efficientnet = torch.nn.Sequential(*(list(torch.nn.Sequential(*(list(efficientnet_b2.children())[:-2]))[0].children())[:-1]))
-        elif variant == 'b3':
-            efficientnet_b3 = models.efficientnet_b3(weights='EfficientNet_B3_Weights.IMAGENET1K_V1')
-            self.efficientnet = torch.nn.Sequential(*(list(torch.nn.Sequential(*(list(efficientnet_b3.children())[:-2]))[0].children())[:-1]))
-        elif variant == 'b4':
-            efficientnet_b4 = models.efficientnet_b4(weights='EfficientNet_B4_Weights.IMAGENET1K_V1')
-            self.efficientnet = torch.nn.Sequential(*(list(torch.nn.Sequential(*(list(efficientnet_b4.children())[:-2]))[0].children())[:-1]))
-        elif variant == 'b5':
-            efficientnet_b5 = models.efficientnet_b5(weights='EfficientNet_B5_Weights.IMAGENET1K_V1')
-            self.efficientnet = torch.nn.Sequential(*(list(torch.nn.Sequential(*(list(efficientnet_b5.children())[:-2]))[0].children())[:-1]))
-        elif variant == 'b6':
-            efficientnet_b6 = models.efficientnet_b6(weights='EfficientNet_B6_Weights.IMAGENET1K_V1')
-            self.efficientnet = torch.nn.Sequential(*(list(torch.nn.Sequential(*(list(efficientnet_b6.children())[:-2]))[0].children())[:-1]))
-        else:
-            efficientnet_b7 = models.efficientnet_b7(weights='EfficientNet_B7_Weights.IMAGENET1K_V1')
-            self.efficientnet = torch.nn.Sequential(*(list(torch.nn.Sequential(*(list(efficientnet_b7.children())[:-2]))[0].children())[:-1]))
-
-        for param in self.efficientnet.parameters():
-            param.requires_grad = False
-        self.dropout = nn.Dropout(p=0.10)
-        self.firstconv = nn.Conv2d(320, 160, 3, padding=1)
-        self.elu = nn.ELU()
-        self.secondconv = nn.Conv2d(160, 160, 3, padding=1)
-        self.linear = nn.Linear(160*4*5, 256)#nn.Linear(128*14*14, 512)
-        self.linear_s = nn.Linear(256, 30)
-        self.tanh = nn.Tanh()
-        self.max_seq_len = max_seq_len
-
-    def forward(self, inp, static=False):#(self, inp, backward=False):
-        #self.resnet.eval()
-        extracted_features = []
-        for i in range(0, len(inp)):
-            with torch.no_grad():
-                effnet_features = self.efficientnet(inp[i])#'.squeeze()
-            feats = self.dropout(effnet_features)
-            feats = self.firstconv(feats)
-            feats = self.elu(feats)
-            feats = self.dropout(feats)
-            feats = self.secondconv(feats)
-            feats = self.elu(feats)
-            feats = torch.flatten(feats, start_dim=1)
-            feats = self.linear(feats)
-            feats = self.linear_s(feats)
-            extracted_feature = self.tanh(feats)
-            if static == False:
-                if len(extracted_feature) < self.max_seq_len:
-                    extracted_feature = torch.nn.functional.pad(input=extracted_feature, pad=(0, 0, 0, self.max_seq_len-len(extracted_feature)), mode='constant',
-                                               value=0)
-            extracted_features.append(extracted_feature.unsqueeze(0))
-        extracted_features = torch.cat(extracted_features)
-        return extracted_features
 
 class Encoder(nn.Module):
     def __init__(self, params, lang=False, lstm_type='peephole'):
@@ -1018,12 +1041,7 @@ class PTAE(nn.Module):
         if self.act_enc_type == 'LSTM':
             encoded_act = self.action_encoder(VB_input, inp['V_len'].int().numpy())
         else:
-            encoded_act = VB_input.permute(1,0,2).float()#encoded_act_orig = VB_input.permute(1,0,2).float()#
-            #encoded_act = []
-            #ts_interval = int(encoded_act_orig.shape[1] / encoded_lang.shape[1])
-            #for ts in range(0, encoded_lang.shape[1]):
-            #    encoded_act.append(encoded_act_orig[:, ts*ts_interval, :])
-            #encoded_act = torch.stack(encoded_act, dim=1)
+            encoded_act = VB_input.permute(1,0,2).float()
 
         h = self.hidden(encoded_lang, encoded_act, None, None)
         h = h.mean(1)
@@ -1140,7 +1158,6 @@ class PTAE(nn.Module):
 
         L_dec_init_state = self.initial_lang(h)
         VB_dec_init_state = self.initial_act(h)
-        #B_output = self.action_decoder(VB_input_f, int(inp['B_len'].item()), VB_dec_init_state)
 
         if signal=='execute' or signal == 'repeat action':
             if appriori_len:
@@ -1150,7 +1167,6 @@ class PTAE(nn.Module):
                 L_output = self.lang_decoder(inp['L_fw'][0], None, L_dec_init_state, True)
                 B_output = self.action_decoder(VB_input_f, None, VB_dec_init_state)
         else:
-            #self.lang_decoder(inp['L_fw'][0], int(inp['L_len'].item()), L_dec_init_state, True)
             if appriori_len:
                 L_output = self.lang_decoder(inp['L_fw'][0], len(inp['L_fw']), L_dec_init_state, True)
                 B_output = self.action_decoder(VB_input_f, int(inp['B_len'].item()), VB_dec_init_state)
@@ -1224,7 +1240,7 @@ class PTAE(nn.Module):
 
         h=self.hidden(encoded_lang, encoded_act, None, None)
 
-        return h#return encoded_lang, h
+        return h
 
     def inference_conflict(self, inp, signal, appriori_len=True):
         if signal == 'repeat both':
@@ -1273,9 +1289,7 @@ class PTAE(nn.Module):
                 'cuda')
             signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
             signalrow[0,:, self.params.L_input_dim + 1] = 1.0
-            #VB_input = torch.zeros((inp['V_fw'].size()[0], inp['V_fw'].size()[1], inp['V_fw'].size()[2]+inp['B_fw'].size()[2])).to('cuda')
-            #VB_input = torch.cat((inp['V_fw'][0].repeat(len(inp['V_fw']), 1, 1), inp['B_fw'][0].repeat(len(inp['B_fw']), 1, 1)), dim=2) * \
-            #           inp['B_bin'][:, :, 0].unsqueeze(-1).repeat(1, 1, inp['V_fw'].size()[-1] + inp['B_fw'].size()[-1])
+
             VB_input = torch.cat([inp['V_fw'], inp['B_fw']], dim=2)
             VB_input_f = inp['VB_fw']
             lang_in_length = inp['L_len'].int().numpy()
@@ -1301,7 +1315,6 @@ class PTAE(nn.Module):
 
         L_dec_init_state = self.initial_lang(h)
         VB_dec_init_state = self.initial_act(h)
-        #B_output = self.action_decoder(VB_input_f, int(inp['B_len'].item()), VB_dec_init_state)
 
         if signal=='execute' or signal == 'repeat action':
             if appriori_len:
@@ -1311,7 +1324,6 @@ class PTAE(nn.Module):
                 L_output = self.lang_decoder(inp['L_fw'][0], None, L_dec_init_state, True)
                 B_output = self.action_decoder(VB_input_f, None, VB_dec_init_state)
         else:
-            #self.lang_decoder(inp['L_fw'][0], int(inp['L_len'].item()), L_dec_init_state, True)
             if appriori_len:
                 L_output = self.lang_decoder(inp['L_fw'][0], len(inp['L_fw']), L_dec_init_state, True)
                 B_output = self.action_decoder(VB_input_f, int(inp['B_len'].item()), VB_dec_init_state)
@@ -1322,684 +1334,3 @@ class PTAE(nn.Module):
         one_hot = nn.functional.one_hot(max_ind, inp['L_fw'].size()[-1])
 
         return one_hot, B_output
-
-class CrossmodalTransformerDecoderTransformer(nn.Module):
-    def __init__(self, params, word_embedding=False, app_length=True):
-        super(CrossmodalTransformerDecoderTransformer, self).__init__()
-        from crossmodal_transformer import Visual_Ling_Attn as CMTransformer
-        from crossmodal_transformer import LanguageDecoderLayer as LangDecoder
-        from crossmodal_transformer import ActionDecoderLayer as ActDecoder
-        self.params = params
-
-        if word_embedding:
-            self.word_embedding = True
-            self.word_embedder = Embedder(self.params.L_input_dim + 5, emb_dim=params.L_num_units)
-        else:
-            self.word_embedding = False
-
-        self.hidden = CMTransformer(self.params)
-
-        #self.initial_lang = nn.Linear(self.params.hidden_dim, self.params.L_num_units*self.params.L_num_layers*2)
-        #self.initial_act = nn.Linear(self.params.hidden_dim, self.params.VB_num_units*self.params.VB_num_layers*2)
-
-        self.lang_decoder = LangDecoder(self.params, self.hidden.ins_fc)
-        self.action_decoder = ActDecoder(self.params, self.hidden.vis_fc, appriori_length=app_length)
-
-    def forward(self, inp, signal, appriori_len=True):
-        if signal == 'repeat both':
-            l_fw_ndim = torch.cat((inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            VB_input = torch.cat([inp['V_fw'], inp['B_fw']], dim=2)
-            signalrow[0, :, self.params.L_input_dim + 3] = 1.0
-            lang_in_length = inp['L_len'].int().numpy()
-        elif signal == 'repeat language':
-            l_fw_ndim = torch.cat((inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            signalrow[0,:,self.params.L_input_dim+4] = 1.0
-            #VB_input = torch.zeros((inp['V_fw'].size()[0], inp['V_fw'].size()[1], inp['V_fw'].size()[2]+inp['B_fw'].size()[2])).to('cuda')
-            VB_input = torch.cat((inp['V_fw'][0].repeat(len(inp['V_fw']), 1, 1), inp['B_fw'][0].repeat(len(inp['B_fw']), 1, 1)), dim=2) * \
-                       inp['B_bin'][:, :, 0].unsqueeze(-1).repeat(1, 1, inp['V_fw'].size()[-1] + inp['B_fw'].size()[-1])
-            lang_in_length = inp['L_len'].int().numpy()
-        elif signal == 'repeat action':
-            signalrow = torch.zeros((1, inp['L_fw'].size()[1], inp['L_fw'].size()[2]+5), requires_grad=True).to('cuda')
-            VB_input = torch.cat([inp['V_fw'], inp['B_fw']], dim=2)
-            signalrow[0,:,self.params.L_input_dim+2] = 1.0
-            if appriori_len:
-                l_fw_ndim = torch.cat((inp['L_fw'][-1].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            else:
-                l_fw_eos = torch.zeros((1, inp['L_fw'].shape[1], inp['L_fw'].shape[2]+5))
-                l_fw_eos[:, :, 1] = 1
-                l_fw_ndim = l_fw_eos.to('cuda')
-            lang_in_length = inp['L_len'].int().numpy() - (inp['L_len'].int().numpy() - 1)
-        elif signal == 'describe':
-            signalrow = torch.zeros((1, inp['L_fw'].size()[1], inp['L_fw'].size()[2]+5), requires_grad=True).to('cuda')
-            VB_input = torch.cat([inp['V_fw'], inp['B_fw']], dim=2)
-            signalrow[0, :, self.params.L_input_dim] = 1.0
-            if appriori_len:
-                l_fw_ndim = torch.cat((inp['L_fw'][-1].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            else:
-                l_fw_eos = torch.zeros((1, inp['L_fw'].shape[1], inp['L_fw'].shape[2]+5))
-                l_fw_eos[:, :, 1] = 1
-                l_fw_ndim = l_fw_eos.to('cuda')
-            lang_in_length = inp['L_len'].int().numpy() - (inp['L_len'].int().numpy() - 1)
-        else:
-            l_fw_ndim = torch.cat((inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            signalrow[0, :, self.params.L_input_dim+1] = 1.0
-            #VB_input = torch.zeros((inp['V_fw'].size()[0], inp['V_fw'].size()[1], inp['V_fw'].size()[2]+inp['B_fw'].size()[2])).to('cuda')
-            VB_input=torch.cat((inp['V_fw'][0].repeat(len(inp['V_fw']), 1, 1), inp['B_fw'][0].repeat(len(inp['B_fw']), 1, 1)), dim=2) *\
-                     inp['B_bin'][:, :, 0].unsqueeze(-1).repeat(1, 1, inp['V_fw'].size()[-1] + inp['B_fw'].size()[-1])
-            lang_in_length = inp['L_len'].int().numpy()
-        lang_inp = torch.cat((signalrow, l_fw_ndim), axis=0).to('cuda')
-
-        if self.word_embedding:
-            encoded_lang = self.word_embedder(lang_inp.argmax(axis=-1)).permute(1,0,2)
-        else:
-            encoded_lang = lang_inp.permute(1,0,2).float()
-
-        encoded_act = VB_input.permute(1,0,2).float()#encoded_act_orig = VB_input.permute(1,0,2).float()#
-            #encoded_act = []
-            #ts_interval = int(encoded_act_orig.shape[1] / encoded_lang.shape[1])
-            #for ts in range(0, encoded_lang.shape[1]):
-            #    encoded_act.append(encoded_act_orig[:, ts*ts_interval, :])
-            #encoded_act = torch.stack(encoded_act, dim=1)
-
-        h = self.hidden(encoded_lang, encoded_act, None, None)
-        #h = h.mean(1)
-
-        #L_dec_init_state = self.initial_lang(h)
-        #VB_dec_init_state = self.initial_act(h)
-        mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, VB_input.shape[0]-1, VB_input.shape[0]-1).bool(), diagonal=1).cuda()
-        mask_enc_att = None
-        if signal == 'repeat both':
-            #VB_input_f = inp['VB_fw']
-            mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, l_fw_ndim[:-1].shape[0],
-                                                       l_fw_ndim[:-1].shape[0]).bool(), diagonal=1).cuda()
-            if appriori_len:
-                L_output = self.lang_decoder(l_fw_ndim[:-1].permute(1,0,2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input[:-1].permute(1,0,2), h, mask_self_att_act, mask_enc_att)
-            else:
-                L_output = self.lang_decoder(l_fw_ndim[:-1].permute(1,0,2), None,  h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input[:-1].permute(1,0,2), None, h, mask_self_att_act, mask_enc_att)
-        elif signal == 'describe':
-            VB_input_f = torch.cat((inp["V_bw"][0].repeat(len(inp['V_fw']), 1, 1), inp["B_bw"][0].repeat(len(inp['B_fw']), 1, 1)),axis=-1)
-            L_tar = torch.cat((inp['L_fw'][:-1], torch.zeros(inp['L_fw'].size()[0]-1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_tar.shape[0],
-                                                       L_tar.shape[0]).bool(), diagonal=1).cuda()
-            if appriori_len:
-                L_output = self.lang_decoder(L_tar.permute(1,0,2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input_f[:-1].permute(1,0,2), h, mask_self_att_act, mask_enc_att)
-            else:
-                L_output = self.lang_decoder(L_tar.permute(1,0,2), None, h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input_f[:-1].permute(1,0,2), None, h, mask_self_att_act, mask_enc_att)
-        elif signal == 'repeat language':
-            VB_input_f = torch.cat((inp["V_fw"][0].repeat(len(inp['V_fw']),1,1), inp["B_fw"][0].repeat(len(inp['B_fw']),1,1)),axis=-1)
-            mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, l_fw_ndim[:-1].shape[0],
-                                                       l_fw_ndim[:-1].shape[0]).bool(), diagonal=1).cuda()
-            if appriori_len:
-                L_output = self.lang_decoder(l_fw_ndim[:-1].permute(1,0,2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input_f[:-1].permute(1,0,2), h, mask_self_att_act, mask_enc_att)
-            else:
-                L_output = self.lang_decoder(l_fw_ndim[:-1].permute(1,0,2), None, h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input_f[:-1].permute(1,0,2), None, h, mask_self_att_act, mask_enc_att)
-        elif signal == 'repeat action':
-            L_tar = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_tar.shape[0],
-                                                       L_tar.shape[0]).bool(), diagonal=1).cuda()
-            #VB_input_f = inp['VB_fw']
-            if appriori_len:
-                L_output = self.lang_decoder(L_tar.permute(1,0,2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input[:-1].permute(1,0,2), h, mask_self_att_act, mask_enc_att)
-            else:
-                L_output = self.lang_decoder(L_tar.permute(1,0,2), None, h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input[:-1].permute(1,0,2), None, h, mask_self_att_act, mask_enc_att)
-        else:
-            # VB_input_f = inp['VB_fw']
-
-            L_tar = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_tar.shape[0],
-                                                       L_tar.shape[0]).bool(), diagonal=1).cuda()
-            if appriori_len:
-                L_output = self.lang_decoder(L_tar.permute(1, 0, 2), h, mask_self_att_lang,
-                                             mask_enc_att)
-                B_output = self.action_decoder(VB_input[:-1].permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-            else:
-                L_output = self.lang_decoder(L_tar.permute(1, 0, 2), None, h, mask_self_att_lang,
-                                             mask_enc_att)
-                B_output = self.action_decoder(VB_input[:-1].permute(1, 0, 2), None, h, mask_self_att_act, mask_enc_att)
-        return L_output, B_output
-
-    def inference(self, inp, signal, appriori_len=True):
-        if signal == 'repeat both':
-            l_fw_ndim = torch.cat((inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            VB_input = torch.cat([inp['V_fw'], inp['B_fw']], dim=2)
-            signalrow[0, :, self.params.L_input_dim + 3] = 1.0
-            lang_in_length = inp['L_len'].int().numpy()
-        elif signal == 'repeat language':
-            l_fw_ndim = torch.cat((inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            signalrow[0,:,self.params.L_input_dim+4] = 1.0
-            #VB_input = torch.zeros((inp['V_fw'].size()[0], inp['V_fw'].size()[1], inp['V_fw'].size()[2]+inp['B_fw'].size()[2])).to('cuda')
-            VB_input = torch.cat((inp['V_fw'][0].repeat(len(inp['V_fw']), 1, 1), inp['B_fw'][0].repeat(len(inp['B_fw']), 1, 1)), dim=2) * \
-                       inp['B_bin'][:, :, 0].unsqueeze(-1).repeat(1, 1, inp['V_fw'].size()[-1] + inp['B_fw'].size()[-1])
-            lang_in_length = inp['L_len'].int().numpy()
-        elif signal == 'repeat action':
-            signalrow = torch.zeros((1, inp['L_fw'].size()[1], inp['L_fw'].size()[2]+5), requires_grad=True).to('cuda')
-            VB_input = torch.cat([inp['V_fw'], inp['B_fw']], dim=2)
-            signalrow[0,:,self.params.L_input_dim+2] = 1.0
-            if appriori_len:
-                l_fw_ndim = torch.cat((inp['L_fw'][-1].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            else:
-                l_fw_eos = torch.zeros((1, inp['L_fw'].shape[1], inp['L_fw'].shape[2]+5))
-                l_fw_eos[:, :, 1] = 1
-                l_fw_ndim = l_fw_eos.to('cuda')
-            lang_in_length = inp['L_len'].int().numpy() - (inp['L_len'].int().numpy() - 1)
-        elif signal == 'describe':
-            signalrow = torch.zeros((1, inp['L_fw'].size()[1], inp['L_fw'].size()[2]+5), requires_grad=True).to('cuda')
-            VB_input = torch.cat([inp['V_fw'], inp['B_fw']], dim=2)
-            signalrow[0, :, self.params.L_input_dim] = 1.0
-            if appriori_len:
-                l_fw_ndim = torch.cat((inp['L_fw'][-1].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            else:
-                l_fw_eos = torch.zeros((1, inp['L_fw'].shape[1], inp['L_fw'].shape[2]+5))
-                l_fw_eos[:, :, 1] = 1
-                l_fw_ndim = l_fw_eos.to('cuda')
-            lang_in_length = inp['L_len'].int().numpy() - (inp['L_len'].int().numpy() - 1)
-        else:
-            l_fw_ndim = torch.cat((inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            signalrow[0, :, self.params.L_input_dim+1] = 1.0
-            #VB_input = torch.zeros((inp['V_fw'].size()[0], inp['V_fw'].size()[1], inp['V_fw'].size()[2]+inp['B_fw'].size()[2])).to('cuda')
-            VB_input=torch.cat((inp['V_fw'][0].repeat(len(inp['V_fw']), 1, 1), inp['B_fw'][0].repeat(len(inp['B_fw']), 1, 1)), dim=2) *\
-                     inp['B_bin'][:, :, 0].unsqueeze(-1).repeat(1, 1, inp['V_fw'].size()[-1] + inp['B_fw'].size()[-1])
-            lang_in_length = inp['L_len'].int().numpy()
-        lang_inp = torch.cat((signalrow, l_fw_ndim), axis=0).to('cuda')
-
-        if self.word_embedding:
-            encoded_lang = self.word_embedder(lang_inp.argmax(axis=-1)).permute(1,0,2)
-        else:
-            encoded_lang = lang_inp.permute(1,0,2).float()
-
-
-        encoded_act = VB_input.permute(1,0,2).float()
-
-        h = self.hidden(encoded_lang, encoded_act, None, None)
-        #h = h.mean(1)
-
-        #L_dec_init_state = self.initial_lang(h)
-        #VB_dec_init_state = self.initial_act(h)
-        #mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, 1, 1).bool(), diagonal=1).cuda()
-        mask_enc_att = None
-        if signal == 'describe':
-            #VB_input_f = torch.cat((inp["V_bw"][0].repeat(len(inp['V_fw']), 1, 1), inp["B_bw"][0].repeat(len(inp['B_fw']), 1, 1)),axis=-1)
-            B_out = torch.cat((inp["V_bw"][0].unsqueeze(0), inp["B_bw"][0].unsqueeze(0)), axis=-1)
-            L_out = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            if appriori_len:
-                for i in range(int(inp['L_len'].item())-1):
-                    mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                               L_out.shape[0]).bool(), diagonal=1).cuda()
-                    L_output = self.lang_decoder(L_out.permute(1,0,2), h, mask_self_att_lang, mask_enc_att)
-                    #use one hot encoded version of the output
-                    #max_ind = torch.argmax(L_output[-1, :, :self.params.L_input_dim], -1)
-                    #L_output = nn.functional.one_hot(max_ind, self.params.L_input_dim).unsqueeze(0)
-                    #L_output = torch.cat((L_output, torch.zeros(1, L_output.size()[1], 5).to('cuda')),axis=-1).to('cuda')
-                    L_output = torch.cat((L_output[-1].unsqueeze(0), torch.zeros(1, L_output.size()[1], 5).to('cuda')), axis=-1).to('cuda')
-                    L_out = torch.cat((L_out,L_output), axis=0)
-                for i in range(int(inp['B_len'].item()) - 1):
-                    mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                                                   diagonal=1).cuda()
-                    B_output = self.action_decoder(B_out.permute(1,0,2), h, mask_self_att_act, mask_enc_att)
-                    B_output = torch.cat((inp["V_bw"][0].unsqueeze(0), B_output[-1].unsqueeze(0)), axis=-1)
-                    B_out = torch.cat((B_out,B_output), axis=0)
-            else:   ## code this later
-                mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                    diagonal=1).cuda()
-                mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                           L_out.shape[0]).bool(), diagonal=1).cuda()
-                L_output = self.lang_decoder(L_out.permute(1,0,2), None, h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(B_out[:-1].permute(1,0,2), None, h, mask_self_att_act, mask_enc_att)
-        elif signal == 'repeat language':
-            #VB_input_f = torch.cat((inp["V_fw"][0].repeat(len(inp['V_fw']),1,1), inp["B_fw"][0].repeat(len(inp['B_fw']),1,1)),axis=-1)
-            B_out = torch.cat((inp["V_fw"][0].unsqueeze(0), inp["B_fw"][0].unsqueeze(0)), axis=-1)
-            L_out = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            if appriori_len:
-                for i in range(int(inp['L_len'].item())-1):
-                    mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                               L_out.shape[0]).bool(), diagonal=1).cuda()
-                    L_output = self.lang_decoder(L_out.permute(1,0,2), h, mask_self_att_lang, mask_enc_att)
-                    L_output = torch.cat((L_output[-1].unsqueeze(0), torch.zeros(1, L_output.size()[1], 5).to('cuda')), axis=-1).to('cuda')
-                    L_out = torch.cat((L_out,L_output), axis=0)
-                for i in range(int(inp['B_len'].item()) - 1):
-                    mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                                                   diagonal=1).cuda()
-                    B_output = self.action_decoder(B_out.permute(1,0,2), h, mask_self_att_act, mask_enc_att)
-                    B_output = torch.cat((inp["V_fw"][0].unsqueeze(0), B_output[-1].unsqueeze(0)), axis=-1)
-                    B_out = torch.cat((B_out,B_output), axis=0)
-            else: ## code later
-                mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                           L_out.shape[0]).bool(), diagonal=1).cuda()
-                mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                    diagonal=1).cuda()
-                L_output = self.lang_decoder(l_fw_ndim[:-1].permute(1,0,2), None, h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(B_out[:-1].permute(1,0,2), None, h, mask_self_att_act, mask_enc_att)
-        elif signal == 'repeat action':
-            L_out = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            #VB_input_f = inp['VB_fw']
-            B_out = torch.cat((inp["V_fw"][0].unsqueeze(0), inp["B_fw"][0].unsqueeze(0)), axis=-1)
-            if appriori_len:
-                for i in range(1):
-                    mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                               L_out.shape[0]).bool(), diagonal=1).cuda()
-                    L_output = self.lang_decoder(L_out.permute(1,0,2), h, mask_self_att_lang, mask_enc_att)
-                    L_output = torch.cat((L_output[-1].unsqueeze(0), torch.zeros(1, L_output.size()[1], 5).to('cuda')), axis=-1).to('cuda')
-                    L_out = torch.cat((L_out,L_output), axis=0)
-                for i in range(int(inp['B_len'].item()) - 1):
-                    mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                                                   diagonal=1).cuda()
-                    B_output = self.action_decoder(B_out.permute(1,0,2), h, mask_self_att_act, mask_enc_att)
-                    B_output = torch.cat((inp["V_fw"][i+1].unsqueeze(0), B_output[-1].unsqueeze(0)), axis=-1)
-                    B_out = torch.cat((B_out,B_output), axis=0)
-            else: ## code later
-                mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                           L_out.shape[0]).bool(), diagonal=1).cuda()
-                mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                    diagonal=1).cuda()
-                L_output = self.lang_decoder(L_out.permute(1,0,2), None, h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(B_out[:-1].permute(1,0,2), None, h, mask_self_att_act, mask_enc_att)
-        else:
-            # VB_input_f = inp['VB_fw']
-            B_out = torch.cat((inp["V_fw"][0].unsqueeze(0), inp["B_fw"][0].unsqueeze(0)), axis=-1)
-            L_out = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            if appriori_len:
-                for i in range(1):
-                    mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                               L_out.shape[0]).bool(), diagonal=1).cuda()
-                    L_output = self.lang_decoder(L_out.permute(1,0,2), h, mask_self_att_lang, mask_enc_att)
-                    L_output = torch.cat((L_output[-1].unsqueeze(0), torch.zeros(1, L_output.size()[1], 5).to('cuda')), axis=-1).to('cuda')
-                    L_out = torch.cat((L_out,L_output), axis=0)
-                for i in range(int(inp['B_len'].item()) - 1):
-                    mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                                                   diagonal=1).cuda()
-                    B_output = self.action_decoder(B_out.permute(1,0,2), h, mask_self_att_act, mask_enc_att)
-                    B_output = torch.cat((inp["V_fw"][i+1].unsqueeze(0), B_output[-1].unsqueeze(0)), axis=-1)
-                    B_out = torch.cat((B_out,B_output), axis=0)
-            else: ## code later
-                mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                           L_out.shape[0]).bool(), diagonal=1).cuda()
-                mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                    diagonal=1).cuda()
-                L_output = self.lang_decoder(L_out.permute(1, 0, 2), None, h, mask_self_att_lang,
-                                             mask_enc_att)
-                B_output = self.action_decoder(B_out[:-1].permute(1, 0, 2), None, h, mask_self_att_act, mask_enc_att)
-        max_ind = torch.argmax(L_out[1:,:,:self.params.L_input_dim], -1)
-        one_hot = nn.functional.one_hot(max_ind, inp['L_fw'].size()[-1])
-
-        return one_hot.squeeze(1), B_out[1:,:,self.params.VB_input_dim-self.params.B_input_dim:].squeeze(1)
-
-class CrossmodalTransformerDecoderTransformerResNet(nn.Module):
-    def __init__(self, params, word_embedding=False, app_length=True):
-        super(CrossmodalTransformerDecoderTransformerResNet, self).__init__()
-        from crossmodal_transformer import Visual_Ling_Attn as CMTransformer
-        from crossmodal_transformer import LanguageDecoderLayer as LangDecoder
-        from crossmodal_transformer import ActionDecoderLayer as ActDecoder
-        self.params = params
-
-        self.vis_feat_extractor = ResNetFeatExtractor(18, self.params.B_max_length)#EfficientNetFeatExtractor('b0', self.params.B_max_length)
-
-        if word_embedding:
-            self.word_embedding = True
-            self.word_embedder = Embedder(self.params.L_input_dim + 5, emb_dim=params.L_num_units)
-        else:
-            self.word_embedding = False
-
-        self.hidden = CMTransformer(self.params)
-
-        # self.initial_lang = nn.Linear(self.params.hidden_dim, self.params.L_num_units*self.params.L_num_layers*2)
-        # self.initial_act = nn.Linear(self.params.hidden_dim, self.params.VB_num_units*self.params.VB_num_layers*2)
-
-        self.lang_decoder = LangDecoder(self.params, self.hidden.ins_fc)
-        self.action_decoder = ActDecoder(self.params, self.hidden.vis_fc, appriori_length=app_length)
-
-    def forward(self, inp, signal, appriori_len=True):
-        if signal == 'repeat both':
-            l_fw_ndim = torch.cat((inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            visual_features = self.vis_feat_extractor(inp['images']).transpose(0, 1)
-            VB_input = visual_features#torch.cat([visual_features, inp['B_fw']], dim=2)
-            signalrow[0, :, self.params.L_input_dim + 3] = 1.0
-
-        elif signal == 'repeat language':
-            l_fw_ndim = torch.cat(
-                (inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            signalrow[0, :, self.params.L_input_dim + 4] = 1.0
-            for idx in range(len(inp['images'])):
-                 inp['images'][idx] = inp['images'][idx][0].unsqueeze(0)
-            visual_features = self.vis_feat_extractor(inp['images'], True).transpose(0, 1)
-            VB_input = torch.cat((visual_features.repeat(len(inp['B_fw']), 1, 1), inp['B_fw'][0].repeat(len(inp['B_fw']), 1, 1)), dim=2) * \
-                       inp['B_bin'][:, :, 0].unsqueeze(-1).repeat(1, 1, visual_features.size()[-1] + inp['B_fw'].size()[-1])
-
-            # visual_features.repeat(len(inp['B_fw']), 1, 1)#
-        elif signal == 'repeat action':
-            signalrow = torch.zeros((1, inp['L_fw'].size()[1], inp['L_fw'].size()[2] + 5), requires_grad=True).to(
-                'cuda')
-            visual_features = self.vis_feat_extractor(inp['images']).transpose(0, 1)
-            VB_input = torch.cat([visual_features, inp['B_fw']], dim=2)
-            signalrow[0, :, self.params.L_input_dim + 2] = 1.0
-            if appriori_len:
-                l_fw_ndim = torch.cat(
-                    (inp['L_fw'][-1].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                    'cuda')
-            else:
-                l_fw_eos = torch.zeros((1, inp['L_fw'].shape[1], inp['L_fw'].shape[2] + 5))
-                l_fw_eos[:, :, 1] = 1
-                l_fw_ndim = l_fw_eos.to('cuda')
-
-        elif signal == 'describe':
-            signalrow = torch.zeros((1, inp['L_fw'].size()[1], inp['L_fw'].size()[2] + 5), requires_grad=True).to(
-                'cuda')
-            visual_features = self.vis_feat_extractor(inp['images']).transpose(0, 1)
-            VB_input = torch.cat([visual_features, inp['B_fw']], dim=2)#visual_features#
-            signalrow[0, :, self.params.L_input_dim] = 1.0
-            if appriori_len:
-                l_fw_ndim = torch.cat(
-                    (inp['L_fw'][-1].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                    'cuda')
-            else:
-                l_fw_eos = torch.zeros((1, inp['L_fw'].shape[1], inp['L_fw'].shape[2] + 5))
-                l_fw_eos[:, :, 1] = 1
-                l_fw_ndim = l_fw_eos.to('cuda')
-
-        else:
-            l_fw_ndim = torch.cat(
-                (inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to(
-                'cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            signalrow[0, :, self.params.L_input_dim + 1] = 1.0
-            #for idx in range(len(inp['images'])):
-                #inp['images'][idx] = inp['images'][idx][0].unsqueeze(0)
-            visual_features = self.vis_feat_extractor(inp['images']).transpose(0, 1)
-            VB_input = torch.cat((visual_features[0].repeat(len(inp['B_fw']), 1, 1), inp['B_fw'][0].repeat(len(inp['B_fw']), 1, 1)), dim=2) * \
-                       inp['B_bin'][:, :, 0].unsqueeze(-1).repeat(1, 1, visual_features[0].size()[-1] + inp['B_fw'].size()[-1])
-
-        lang_inp = torch.cat((signalrow, l_fw_ndim), axis=0).to('cuda')
-
-        if self.word_embedding:
-            encoded_lang = self.word_embedder(lang_inp.argmax(axis=-1)).permute(1, 0, 2)
-        else:
-            encoded_lang = lang_inp.permute(1, 0, 2).float()
-
-        encoded_act = VB_input.permute(1, 0, 2).float()  # encoded_act_orig = VB_input.permute(1,0,2).float()#
-        # encoded_act = []
-        # ts_interval = int(encoded_act_orig.shape[1] / encoded_lang.shape[1])
-        # for ts in range(0, encoded_lang.shape[1]):
-        #    encoded_act.append(encoded_act_orig[:, ts*ts_interval, :])
-        # encoded_act = torch.stack(encoded_act, dim=1)
-
-        h = self.hidden(encoded_lang, encoded_act, None, None)
-        # h = h.mean(1)
-
-        # L_dec_init_state = self.initial_lang(h)
-        # VB_dec_init_state = self.initial_act(h)
-        mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads,
-                                                  VB_input.shape[0] - 1, VB_input.shape[0] - 1).bool(),diagonal=1).cuda()
-        mask_enc_att = None
-        if signal == 'repeat both':
-            # VB_input_f = inp['VB_fw']
-            mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, l_fw_ndim[:-1].shape[0],
-                                                       l_fw_ndim[:-1].shape[0]).bool(), diagonal=1).cuda()
-            if appriori_len:
-                L_output = self.lang_decoder(l_fw_ndim[:-1].permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input[:-1].permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-            else:
-                L_output = self.lang_decoder(l_fw_ndim[:-1].permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input[:-1].permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-        elif signal == 'describe':
-            VB_input_f = torch.cat((visual_features[-1].repeat(len(inp['B_fw']), 1, 1), inp["B_bw"][0].repeat(len(inp['B_fw']), 1, 1)), axis=-1)#visual_features[-1].repeat(len(inp['B_fw']), 1, 1)
-            L_tar = torch.cat(
-                (inp['L_fw'][:-1], torch.zeros(inp['L_fw'].size()[0] - 1, inp['L_fw'].size()[1], 5).to('cuda')),
-                axis=-1).to(
-                'cuda')
-            mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_tar.shape[0],
-                                                       L_tar.shape[0]).bool(), diagonal=1).cuda()
-            if appriori_len:
-                L_output = self.lang_decoder(L_tar.permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input_f[:-1].permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-            else:
-                L_output = self.lang_decoder(L_tar.permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input_f[:-1].permute(1, 0, 2), h, mask_self_att_act,
-                                               mask_enc_att)
-        elif signal == 'repeat language':
-            VB_input_f = torch.cat((visual_features.repeat(len(inp['B_fw']), 1, 1), inp["B_fw"][0].repeat(len(inp['B_fw']), 1, 1)), axis=-1)#visual_features.repeat(len(inp['B_fw']), 1, 1)#
-            mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, l_fw_ndim[:-1].shape[0],
-                                                       l_fw_ndim[:-1].shape[0]).bool(), diagonal=1).cuda()
-            if appriori_len:
-                L_output = self.lang_decoder(l_fw_ndim[:-1].permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input_f[:-1].permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-            else:
-                L_output = self.lang_decoder(l_fw_ndim[:-1].permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input_f[:-1].permute(1, 0, 2), h, mask_self_att_act,
-                                               mask_enc_att)
-        elif signal == 'repeat action':
-            L_tar = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')),
-                              axis=-1).to(
-                'cuda')
-            mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_tar.shape[0],
-                                                       L_tar.shape[0]).bool(), diagonal=1).cuda()
-            # VB_input_f = inp['VB_fw']
-            if appriori_len:
-                L_output = self.lang_decoder(L_tar.permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input[:-1].permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-            else:
-                L_output = self.lang_decoder(L_tar.permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(VB_input[:-1].permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-        else:
-            # VB_input_f = inp['VB_fw']
-            VB_input_f = torch.cat([visual_features, inp['B_fw']], dim=2)
-            L_tar = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')),
-                              axis=-1).to(
-                'cuda')
-            mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_tar.shape[0],
-                                                       L_tar.shape[0]).bool(), diagonal=1).cuda()
-            if appriori_len:
-                L_output = self.lang_decoder(L_tar.permute(1, 0, 2), h, mask_self_att_lang,
-                                             mask_enc_att)
-                B_output = self.action_decoder(VB_input_f[:-1].permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-            else:
-                L_output = self.lang_decoder(L_tar.permute(1, 0, 2), h, mask_self_att_lang,
-                                             mask_enc_att)
-                B_output = self.action_decoder(VB_input_f[:-1].permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-        return L_output, B_output
-
-    def inference(self, inp, signal, appriori_len=True):
-        if signal == 'repeat language':
-            l_fw_ndim = torch.cat((inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            signalrow[0, :, self.params.L_input_dim + 4] = 1.0
-            for idx in range(len(inp['images'])):
-                 inp['images'][idx] = inp['images'][idx][0].unsqueeze(0)
-            visual_features = self.vis_feat_extractor(inp['images'], True).transpose(0, 1)
-            VB_input = torch.cat((visual_features.repeat(len(inp['B_fw']), 1, 1), inp['B_fw'][0].repeat(len(inp['B_fw']), 1, 1)), dim=2) * \
-                       inp['B_bin'][:, :, 0].unsqueeze(-1).repeat(1, 1, visual_features.size()[-1] + inp['B_fw'].size()[-1])
-
-        elif signal == 'repeat action':
-            signalrow = torch.zeros((1, inp['L_fw'].size()[1], inp['L_fw'].size()[2] + 5), requires_grad=True).to('cuda')
-            visual_features = self.vis_feat_extractor(inp['images']).transpose(0, 1)
-            VB_input = torch.cat([visual_features, inp['B_fw']], dim=2)
-            signalrow[0, :, self.params.L_input_dim + 2] = 1.0
-            if appriori_len:
-                l_fw_ndim = torch.cat((inp['L_fw'][-1].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            else:
-                l_fw_eos = torch.zeros((1, inp['L_fw'].shape[1], inp['L_fw'].shape[2] + 5))
-                l_fw_eos[:, :, 1] = 1
-                l_fw_ndim = l_fw_eos.to('cuda')
-
-        elif signal == 'describe':
-            signalrow = torch.zeros((1, inp['L_fw'].size()[1], inp['L_fw'].size()[2] + 5), requires_grad=True).to('cuda')
-            visual_features = self.vis_feat_extractor(inp['images']).transpose(0, 1)
-            VB_input = torch.cat([visual_features, inp['B_fw']], dim=2)#visual_features#
-            signalrow[0, :, self.params.L_input_dim] = 1.0
-            if appriori_len:
-                l_fw_ndim = torch.cat((inp['L_fw'][-1].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            else:
-                l_fw_eos = torch.zeros((1, inp['L_fw'].shape[1], inp['L_fw'].shape[2] + 5))
-                l_fw_eos[:, :, 1] = 1
-                l_fw_ndim = l_fw_eos.to('cuda')
-
-        else:
-            l_fw_ndim = torch.cat((inp['L_fw'], torch.zeros(inp['L_fw'].size()[0], inp['L_fw'].size()[1], 5).to('cuda')), axis=-1).to('cuda')
-            signalrow = torch.zeros((1, l_fw_ndim.size()[1], l_fw_ndim.size()[2]), requires_grad=True).to('cuda')
-            signalrow[0, :, self.params.L_input_dim + 1] = 1.0
-            #inp['images_inp'] = []
-            #for idx in range(len(inp['images'])):
-            #    inp['images_inp'].append(inp['images'][idx][0].unsqueeze(0))
-            visual_features = self.vis_feat_extractor(inp['images']).transpose(0, 1)
-            VB_input = torch.cat((visual_features[0].repeat(len(inp['B_fw']), 1, 1), inp['B_fw'][0].repeat(len(inp['B_fw']), 1, 1)), dim=2) * \
-                       inp['B_bin'][:, :, 0].unsqueeze(-1).repeat(1, 1, visual_features[0].size()[-1] + inp['B_fw'].size()[-1])
-
-        lang_inp = torch.cat((signalrow, l_fw_ndim), axis=0).to('cuda')
-
-        if self.word_embedding:
-            encoded_lang = self.word_embedder(lang_inp.argmax(axis=-1)).permute(1, 0, 2)
-        else:
-            encoded_lang = lang_inp.permute(1, 0, 2).float()
-
-        encoded_act = VB_input.permute(1, 0, 2).float()
-        h = self.hidden(encoded_lang, encoded_act, None, None)
-
-        mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, VB_input.shape[0] - 1, VB_input.shape[0] - 1).bool(), diagonal=1).cuda()
-        mask_enc_att = None
-
-        if signal == 'describe':
-            #VB_input_f = torch.cat((visual_features[-1].repeat(len(inp['B_fw']), 1, 1), inp["B_bw"][0].repeat(len(inp['B_fw']), 1, 1)), axis=-1)
-            B_out = torch.cat((visual_features[-1].unsqueeze(0), inp["B_bw"][0].unsqueeze(0)), axis=-1)#visual_features[-1].unsqueeze(0)#
-            L_out = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')),axis=-1).to('cuda')
-            if appriori_len:
-                for i in range(int(inp['L_len'].item()) - 1):
-                    mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                               L_out.shape[0]).bool(), diagonal=1).cuda()
-                    L_output = self.lang_decoder(L_out.permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                    # use one hot encoded version of the output
-                    # max_ind = torch.argmax(L_output[-1, :, :self.params.L_input_dim], -1)
-                    # L_output = nn.functional.one_hot(max_ind, self.params.L_input_dim).unsqueeze(0)
-                    # L_output = torch.cat((L_output, torch.zeros(1, L_output.size()[1], 5).to('cuda')),axis=-1).to('cuda')
-                    L_output = torch.cat((L_output[-1].unsqueeze(0), torch.zeros(1, L_output.size()[1], 5).to('cuda')),
-                                         axis=-1).to('cuda')
-                    L_out = torch.cat((L_out, L_output), axis=0)
-                for i in range(int(inp['B_len'].item()) - 1):
-                    mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),diagonal=1).cuda()
-                    B_output = self.action_decoder(B_out.permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-                    B_output = torch.cat((visual_features[-1].unsqueeze(0), B_output[-1].unsqueeze(0)), axis=-1)#visual_features[-1].unsqueeze(0)#
-                    B_out = torch.cat((B_out, B_output), axis=0)
-            else: # code later
-                mask_self_att_act = torch.triu(
-                    torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                    diagonal=1).cuda()
-                mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                           L_out.shape[0]).bool(), diagonal=1).cuda()
-                L_output = self.lang_decoder(L_out.permute(1, 0, 2), None, h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(B_out[:-1].permute(1, 0, 2), None, h, mask_self_att_act, mask_enc_att)
-
-        elif signal == 'repeat language':
-            #VB_input_f = torch.cat((visual_features.repeat(len(inp['B_fw']), 1, 1), inp["B_fw"][0].repeat(len(inp['B_fw']), 1, 1)), axis=-1)
-            B_out = torch.cat((visual_features[0].unsqueeze(0), inp["B_fw"][0].unsqueeze(0)), axis=-1)
-            L_out = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')),axis=-1).to('cuda')
-
-            if appriori_len:
-                for i in range(int(inp['L_len'].item()) - 1):
-                    mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                               L_out.shape[0]).bool(), diagonal=1).cuda()
-                    L_output = self.lang_decoder(L_out.permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                    L_output = torch.cat((L_output[-1].unsqueeze(0), torch.zeros(1, L_output.size()[1], 5).to('cuda')),
-                                         axis=-1).to('cuda')
-                    L_out = torch.cat((L_out, L_output), axis=0)
-                for i in range(int(inp['B_len'].item()) - 1):
-                    mask_self_att_act = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                        diagonal=1).cuda()
-                    B_output = self.action_decoder(B_out.permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-                    B_output = torch.cat((visual_features[0].unsqueeze(0), B_output[-1].unsqueeze(0)), axis=-1)
-                    B_out = torch.cat((B_out, B_output), axis=0)
-            else: ## code later
-                mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                           L_out.shape[0]).bool(), diagonal=1).cuda()
-                mask_self_att_act = torch.triu(
-                    torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                    diagonal=1).cuda()
-                L_output = self.lang_decoder(l_fw_ndim[:-1].permute(1, 0, 2), None, h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(B_out[:-1].permute(1, 0, 2), None, h, mask_self_att_act, mask_enc_att)
-
-        elif signal == 'repeat action':
-            L_out = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')),
-                              axis=-1).to(
-                'cuda')
-            # VB_input_f = inp['VB_fw']
-            B_out = torch.cat((visual_features[0].unsqueeze(0), inp["B_fw"][0].unsqueeze(0)), axis=-1)
-            if appriori_len:
-                for i in range(1):
-                    mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                               L_out.shape[0]).bool(), diagonal=1).cuda()
-                    L_output = self.lang_decoder(L_out.permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                    L_output = torch.cat((L_output[-1].unsqueeze(0), torch.zeros(1, L_output.size()[1], 5).to('cuda')),axis=-1).to('cuda')
-                    L_out = torch.cat((L_out, L_output), axis=0)
-                for i in range(int(inp['B_len'].item()) - 1):
-                    mask_self_att_act = torch.triu(
-                        torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                        diagonal=1).cuda()
-                    B_output = self.action_decoder(B_out.permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-                    B_output = torch.cat((visual_features[i + 1].unsqueeze(0), B_output[-1].unsqueeze(0)), axis=-1)
-                    B_out = torch.cat((B_out, B_output), axis=0)
-            else:  ## code later
-                mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                           L_out.shape[0]).bool(), diagonal=1).cuda()
-                mask_self_att_act = torch.triu(
-                    torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                    diagonal=1).cuda()
-                L_output = self.lang_decoder(L_out.permute(1, 0, 2), None, h, mask_self_att_lang, mask_enc_att)
-                B_output = self.action_decoder(B_out[:-1].permute(1, 0, 2), None, h, mask_self_att_act, mask_enc_att)
-
-        else:
-            # VB_input_f = inp['VB_fw']
-            B_out = torch.cat((visual_features[0].unsqueeze(0), inp["B_fw"][0].unsqueeze(0)), axis=-1)
-            L_out = torch.cat((inp['L_fw'][0].unsqueeze(0), torch.zeros(1, inp['L_fw'].size()[1], 5).to('cuda')),axis=-1).to('cuda')
-            if appriori_len:
-                for i in range(1):
-                    mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                               L_out.shape[0]).bool(), diagonal=1).cuda()
-                    L_output = self.lang_decoder(L_out.permute(1, 0, 2), h, mask_self_att_lang, mask_enc_att)
-                    L_output = torch.cat((L_output[-1].unsqueeze(0), torch.zeros(1, L_output.size()[1], 5).to('cuda')),
-                                         axis=-1).to('cuda')
-                    L_out = torch.cat((L_out, L_output), axis=0)
-                for i in range(int(inp['B_len'].item()) - 1):
-                    mask_self_att_act = torch.triu(
-                        torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                        diagonal=1).cuda()
-                    B_output = self.action_decoder(B_out.permute(1, 0, 2), h, mask_self_att_act, mask_enc_att)
-                    B_output = torch.cat((visual_features[i + 1].unsqueeze(0), B_output[-1].unsqueeze(0)), axis=-1)
-                    B_out = torch.cat((B_out, B_output), axis=0)
-            else:  ## code later
-                mask_self_att_lang = torch.triu(torch.ones(h.shape[0], self.params.T_num_heads, L_out.shape[0],
-                                                           L_out.shape[0]).bool(), diagonal=1).cuda()
-                mask_self_att_act = torch.triu(
-                    torch.ones(h.shape[0], self.params.T_num_heads, B_out.shape[0], B_out.shape[0]).bool(),
-                    diagonal=1).cuda()
-                L_output = self.lang_decoder(L_out.permute(1, 0, 2), None, h, mask_self_att_lang,
-                                             mask_enc_att)
-                B_output = self.action_decoder(B_out[:-1].permute(1, 0, 2), None, h, mask_self_att_act, mask_enc_att)
-
-        max_ind = torch.argmax(L_out[1:, :, :self.params.L_input_dim], -1)
-        one_hot = nn.functional.one_hot(max_ind, inp['L_fw'].size()[-1])
-
-        return one_hot.squeeze(1), B_out[1:, :, self.params.VB_input_dim - self.params.B_input_dim:].squeeze(1)

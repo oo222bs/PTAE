@@ -1,12 +1,8 @@
 # Paired Transformed Autoencoders
 
-Paired Transformed Autoencoders
+[Learning Bidirectional Action-Language Translation with Limited Supervision and Testing with Incongruent Input](https://www.tandfonline.com/doi/full/10.1080/08839514.2023.2179167)
 
-Last updated: 26 May 2023.
-
-This code has been adapted from Copyright (c) 2018, Tatsuro Yamada <<yamadat@idr.ias.sci.waseda.ac.jp>>
-
-Original repository: https://github.com/ogata-lab/PRAE/
+Last updated: 14 May 2024.
 
 Copyright (c) 2023, Ozan Özdemir <<ozan.oezdemir@uni-hamburg.de>>
 
@@ -17,9 +13,9 @@ Copyright (c) 2023, Ozan Özdemir <<ozan.oezdemir@uni-hamburg.de>>
 - Tensorboard
 
 ## Implementation
-Paired Transformed Autoencoders - Pytorch Implementation
+Paired Transformed Autoencoders (PTAE) - Pytorch Implementation
 
-## Example
+## Training Example
 ```
 $ cd src
 $ python main_ptae.py
@@ -31,5 +27,24 @@ $ python main_ptae.py
 - standard_cae: defines the standard CAE
 - config.py: training and network configurations
 - data_util.py: for reading the data
-- onehotencoder.py: one hot encodes the descriptions
 - inference.py: inference time implementation for PTAE
+- inference_conflict.py: inference time implementation of conflict experiments for PTAE
+
+## Citation
+
+**PTAE**
+```bibtex
+@Article{OKWLHBW23, 
+ 	 author =  {Özdemir, Ozan and Kerzel, Matthias and Weber, Cornelius and Lee, Jae Hee and Hafez, Burhan and Bruns, Patrick and Wermter, Stefan},  
+ 	 title = {Learning Bidirectional Action-Language Translation with Limited Supervision and Testing with Incongruent Input}, 
+ 	 booktitle = {},
+ 	 journal = {Applied Artificial Intelligence},
+ 	 number = {1},
+ 	 volume = {37},
+ 	 pages = {},
+ 	 year = {2023},
+ 	 month = {Feb},
+ 	 publisher = {},
+ 	 doi = {10.1080/08839514.2023.2179167}, 
+ }
+```

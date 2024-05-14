@@ -1,27 +1,24 @@
 import torch
 from ptae import PTAE
-from config import VaeConfig, PtaeConfig, TrainConfig
+from config import PTAEConfig, TrainConfig
 from data_util import save_latent
 import numpy as np
 from dataset import PairedNico2BlocksDataset
 from torch.utils.data import DataLoader
-from data_util import normalise, pad_with_zeros, add_active_feature
+from data_util import normalise
 from proprioception_eval import evaluate
 from nltk.translate.bleu_score import sentence_bleu
 
 # Find the descriptions via given actions
 def main():
     # get the network configuration (parameters such as number of layers and units)
-    paramaters = PtaeConfig()
-    paramaters.set_conf("../train/ptae_conf.txt")
-    #paramaters = VaeConfig()
-    #paramaters.set_conf("../train/vae_conf.txt")
+    parameters = PTAEConfig()
+    parameters.set_conf("../train/ptae_conf.txt")
 
     # get the training configuration (batch size, initialisation, number of iterations, saving and loading directory)
     train_conf = TrainConfig()
     train_conf.set_conf("../train/train_conf.txt")
     save_dir = train_conf.save_dir
-    app_length = True
 
     # Load the dataset
     training_data = PairedNico2BlocksDataset(train_conf)
@@ -42,29 +39,20 @@ def main():
     training_data.V_fw = normalise(training_data.V_fw, max_vis, min_vis) * training_data.V_bin
     test_data.V_bw = normalise(test_data.V_bw, max_vis, min_vis) * test_data.V_bin
     test_data.V_fw = normalise(test_data.V_fw, max_vis, min_vis) * test_data.V_bin
-    # Add the binary active features as the last dimension to joints B
-    if app_length==False:
-        training_data.B_bw = add_active_feature(training_data.B_bw, training_data.B_bin)
-        training_data.B_fw = add_active_feature(training_data.B_fw, training_data.B_bin)
-        test_data.B_bw = add_active_feature(test_data.B_bw, test_data.B_bin)
-        test_data.B_fw = add_active_feature(test_data.B_fw, test_data.B_bin)
 
     train_dataloader = DataLoader(training_data)
     test_dataloader = DataLoader(test_data)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('Using {} device'.format(device))
-    model = PTAE(paramaters, app_length=app_length).to(device)
-    #model = PGAE(paramaters).to(device)
+    model = PTAE(parameters, lang_enc_type='None', act_enc_type='None').to(device)
+
     # Load the trained model
-    checkpoint = torch.load(save_dir + '/ptae.tar')       # get the checkpoint
+    checkpoint = torch.load(save_dir + '/ptae_99_unimodal.tar')       # get the checkpoint
     model.load_state_dict(checkpoint['model_state_dict'])       # load the model state
 
     model.eval()
-    if app_length == False:
-        file = open('../vocabularytc.txt', 'r')
-    else:
-        file = open('../vocabularytc.txt', 'r')
+    file = open('../vocabulary.txt', 'r')
     vocab = file.read().splitlines()
     signal = 'describe'
     train_true = 0
@@ -77,57 +65,43 @@ def main():
         test_bleu_score = 0
     for input in train_dataloader:
         L_fw_before = input["L_fw"].transpose(0, 1)
-        #sentence_idx = np.random.randint(4)
         input["B_fw"] = input["B_fw"].transpose(0, 1).to(device)
         input["V_fw"] = input["V_fw"].transpose(0, 1).to(device)
         input["B_bw"] = input["B_bw"].transpose(0, 1).to(device)
         input["V_bw"] = input["V_bw"].transpose(0, 1).to(device)
         input["B_bin"] = input["B_bin"].transpose(0, 1).to(device)
         input["VB_fw"] = [input["V_fw"][:, :, :], input["B_fw"][0, :, :]]
-        #input["VB_fw"] = [input["V_fw"][0, :, :], input["B_fw"][0, :, :]]
-        #sentence_idx = np.random.randint(8)  # Generate random index for description alternatives
+
+        sentence_idx = np.random.randint(8)  # Generate random index for description alternatives
         # Choose one of the eight description alternatives according to the generated random index
-        #L_fw_feed = L_fw_before[5 * sentence_idx:5 + 5 * sentence_idx, :, :]
-        L_fw_feed = L_fw_before[:4,:,:]#L_fw_before[4 * sentence_idx:4 + 4 * sentence_idx, :, :]
+        L_fw_feed = L_fw_before[5 * sentence_idx:5 + 5 * sentence_idx, :, :]
 
         input["L_fw"] = L_fw_feed.to(device)
         L_fw_before = L_fw_before.numpy()
         with torch.no_grad():
-            lang_result, act_result = model.inference(input, signal, app_length)#model.inference(input, signal)#
+            lang_result, act_result = model.inference(input, signal)
         lang_result = lang_result.cpu()
         act_result = act_result.cpu()
         save_latent(lang_result.unsqueeze(0), input["L_filenames"][0], "inference")  # save the predicted descriptions
-        if app_length == False:
-            act_result = act_result[:,:,:-1]
         act_result = (((act_result+1)/2)*(input["max_joint"]-input["min_joint"]))+input["min_joint"]     # get back raw values
-        if app_length == False:
-            save_latent(act_result, input["B_filenames"][0], "inference")
-        else:
-            save_latent(act_result.unsqueeze(0), input["B_filenames"][0], "inference")
+        save_latent(act_result.unsqueeze(0), input["B_filenames"][0], "inference")
         r = lang_result.argmax(axis=1).numpy()
-        #t = L_fw_before[1:5, 0, :].argmax(axis=1)
-        #t_second = L_fw_before[6:10, 0, :].argmax(axis=1)
-        #t_third = L_fw_before[11:15, 0, :].argmax(axis=1)
-        #t_fourth = L_fw_before[16:20, 0, :].argmax(axis=1)
-        #t_fifth = L_fw_before[21:25, 0, :].argmax(axis=1)
-        #t_sixth = L_fw_before[26:30, 0, :].argmax(axis=1)
-        #t_seventh = L_fw_before[31:35, 0, :].argmax(axis=1)
-        #t_eighth = L_fw_before[36:40, 0, :].argmax(axis=1)
-        t = L_fw_before[1:, 0, :].argmax(axis=1)
-        #t_second = L_fw_before[5:8, 0, :].argmax(axis=1)
-        #t_third = L_fw_before[9:12, 0, :].argmax(axis=1)
-        #t_fourth = L_fw_before[13:16, 0, :].argmax(axis=1)
-        if app_length == False:
-            if t.size > r.size:
-                pad = np.full((t.size - r.size), vocab.index('<PAD>'))
-                r = np.concatenate((r,pad), 0)
+        t = L_fw_before[1:5, 0, :].argmax(axis=1)
+        t_second = L_fw_before[6:10, 0, :].argmax(axis=1)
+        t_third = L_fw_before[11:15, 0, :].argmax(axis=1)
+        t_fourth = L_fw_before[16:20, 0, :].argmax(axis=1)
+        t_fifth = L_fw_before[21:25, 0, :].argmax(axis=1)
+        t_sixth = L_fw_before[26:30, 0, :].argmax(axis=1)
+        t_seventh = L_fw_before[31:35, 0, :].argmax(axis=1)
+        t_eighth = L_fw_before[36:40, 0, :].argmax(axis=1)
+
         # cumulative BLEU scores
         # Check if predicted descriptions match the original ones
         if signal == 'describe' or signal == 'repeat language':
             target = [[]]
             prediction = []
-            if (r == t).all():# or (r == t_second).all() or (r == t_third).all() or (r == t_fourth).all() \
-                    #or (r == t_fifth).all() or (r == t_sixth).all() or (r == t_seventh).all() or (r == t_eighth).all():
+            if (r == t).all() or (r == t_second).all() or (r == t_third).all() or (r == t_fourth).all() \
+                    or (r == t_fifth).all() or (r == t_sixth).all() or (r == t_seventh).all() or (r == t_eighth).all():
                 print(True)
                 train_true = train_true + 1
                 for k in range(r.size):
@@ -148,7 +122,7 @@ def main():
                 train_false = train_false + 1
             train_bleu_score = train_bleu_score + sentence_bleu(target, prediction, weights=(1/2, 1/2))
         elif signal == 'execute' or signal == 'repeat action':
-            if r[0] == vocab.index('<EOS>'):
+            if r[0] == vocab.index('<BOS/EOS>'):
                 print(True)
                 train_true = train_true + 1
                 for k in range(r.size):
@@ -156,7 +130,7 @@ def main():
             else:
                 print(False)
                 print("Expected:", end=" ")
-                print(vocab[vocab.index('<EOS>')], end=" ")
+                print(vocab[vocab.index('<BOS/EOS>')], end=" ")
                 print()
                 train_false = train_false + 1
                 print("Produced:", end=" ")
@@ -171,60 +145,44 @@ def main():
         print("test!")
         for input in test_dataloader:
             L_fw_before = input["L_fw"].transpose(0, 1)
-            #sentence_idx = np.random.randint(4)
             input["B_fw"] = input["B_fw"].transpose(0, 1).to(device)
             input["V_fw"] = input["V_fw"].transpose(0, 1).to(device)
             input["B_bw"] = input["B_bw"].transpose(0, 1).to(device)
             input["V_bw"] = input["V_bw"].transpose(0, 1).to(device)
             input["B_bin"] = input["B_bin"].transpose(0, 1).to(device)
             input["VB_fw"] = [input["V_fw"][:, :, :], input["B_fw"][0, :, :]]
-            #input["VB_fw"] = [input["V_fw"][0, :, :], input["B_fw"][0, :, :]]
-            #sentence_idx = np.random.randint(8)  # Generate random index for description alternatives
+            sentence_idx = np.random.randint(8)  # Generate random index for description alternatives
             # Choose one of the eight description alternatives according to the generated random index
-            #L_fw_feed = L_fw_before[5 * sentence_idx:5 + 5 * sentence_idx, :, :]
-            L_fw_feed = L_fw_before[:4,:,:]#L_fw_before[4 * sentence_idx:4 + 4 * sentence_idx, :, :]
+            L_fw_feed = L_fw_before[5 * sentence_idx:5 + 5 * sentence_idx, :, :]
             input["L_fw"] = L_fw_feed.to(device)
-            #signalrow = torch.zeros((1, L_fw_feed.size()[1], L_fw_feed.size()[2]))
-            #signalrow[0, :, 23] = 1.0
-            #input["signalrow"] = signalrow.to(device)
+
             L_fw_before = L_fw_before.numpy()
             with torch.no_grad():
-                lang_result, act_result = model.inference(input, signal)#model.inference(input, signal, app_length)#
+                lang_result, act_result = model.inference(input, signal)
             lang_result = lang_result.cpu()
             act_result = act_result.cpu()
             save_latent(lang_result.unsqueeze(0), input["L_filenames"][0],
                         "inference")  # save the predicted descriptions
-            if app_length == False:
-                act_result = act_result[:, :, :-1]
             act_result = (((act_result + 1) / 2) * (input["max_joint"] - input["min_joint"])) + input[
                 "min_joint"]  # get back raw values
-            if app_length == False:
-                save_latent(act_result, input["B_filenames"][0], "inference")
-            else:
-                save_latent(act_result.unsqueeze(0), input["B_filenames"][0], "inference")
+
+            save_latent(act_result.unsqueeze(0), input["B_filenames"][0], "inference")
             r = lang_result.argmax(axis=1).numpy()
-            #t = L_fw_before[1:5, 0, :].argmax(axis=1)
-            #t_second = L_fw_before[6:10, 0, :].argmax(axis=1)
-            #t_third = L_fw_before[11:15, 0, :].argmax(axis=1)
-            #t_fourth = L_fw_before[16:20, 0, :].argmax(axis=1)
-            #t_fifth = L_fw_before[21:25, 0, :].argmax(axis=1)
-            #t_sixth = L_fw_before[26:30, 0, :].argmax(axis=1)
-            #t_seventh = L_fw_before[31:35, 0, :].argmax(axis=1)
-            #t_eighth = L_fw_before[36:40, 0, :].argmax(axis=1)
-            t = L_fw_before[1:, 0, :].argmax(axis=1)
-            #t_second = L_fw_before[5:8, 0, :].argmax(axis=1)
-            #t_third = L_fw_before[9:12, 0, :].argmax(axis=1)
-            #t_fourth = L_fw_before[13:16, 0, :].argmax(axis=1)
-            if app_length == False:
-                if t.size > r.size:
-                    pad = np.full((t.size - r.size), vocab.index('<PAD>'))
-                    r = np.concatenate((r, pad), 0)
+            t = L_fw_before[1:5, 0, :].argmax(axis=1)
+            t_second = L_fw_before[6:10, 0, :].argmax(axis=1)
+            t_third = L_fw_before[11:15, 0, :].argmax(axis=1)
+            t_fourth = L_fw_before[16:20, 0, :].argmax(axis=1)
+            t_fifth = L_fw_before[21:25, 0, :].argmax(axis=1)
+            t_sixth = L_fw_before[26:30, 0, :].argmax(axis=1)
+            t_seventh = L_fw_before[31:35, 0, :].argmax(axis=1)
+            t_eighth = L_fw_before[36:40, 0, :].argmax(axis=1)
+
             # Check if predicted descriptions match the original ones
             if signal == 'describe' or signal == 'repeat language':
                 target = [[]]
                 prediction = []
-                if (r == t).all():# or (r == t_second).all() or (r == t_third).all() or (r == t_fourth).all()\
-                        #or (r == t_fifth).all() or (r == t_sixth).all() or (r == t_seventh).all() or (r == t_eighth).all():
+                if (r == t).all() or (r == t_second).all() or (r == t_third).all() or (r == t_fourth).all()\
+                        or (r == t_fifth).all() or (r == t_sixth).all() or (r == t_seventh).all() or (r == t_eighth).all():
                     print(True)
                     test_true = test_true + 1
                     for k in range(r.size):
@@ -245,7 +203,7 @@ def main():
                     test_false = test_false + 1
                 test_bleu_score = test_bleu_score + sentence_bleu(target, prediction, weights=(1/2, 1/2))
             elif signal == 'execute' or signal == 'repeat action':
-                if r[0] == vocab.index('<EOS>'):
+                if r[0] == vocab.index('<BOS/EOS>'):
                     print(True)
                     test_true = test_true + 1
                     for k in range(r.size):
@@ -253,7 +211,7 @@ def main():
                 else:
                     print(False)
                     print("Expected:", end=" ")
-                    print(vocab[vocab.index('<EOS>')], end=" ")
+                    print(vocab[vocab.index('<BOS/EOS>')], end=" ")
                     print()
                     print("Produced:", end=" ")
                     for k in range(r.size):
@@ -263,6 +221,6 @@ def main():
         print('Test sentence accuracy:', "{0:.2%}".format(test_true / (test_true + test_false)))
         if signal == 'describe' or signal == 'repeat language':
             print('Test BLUE-2 Score:', test_bleu_score / (test_true + test_false))
-        evaluate(signal, app_length)
+        evaluate(signal)
 if __name__ == "__main__":
     main()

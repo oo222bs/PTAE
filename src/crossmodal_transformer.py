@@ -1,3 +1,5 @@
+# CMT implementation has been adapted from Irshad et al., 'Hierarchical Cross-Modal Agent for Robotics Vision-and-Language Navigation', 2021
+# The original repo can be found at: https://github.com/GT-RIPL/robo-vln
 from typing import Optional
 
 import numpy as np
@@ -460,9 +462,6 @@ class Visual_Ling_Attn(nn.Module):
         self.d_att = int(
             self.d_model / self.params.T_num_heads
         )  # int(self.d_model / config.h)
-        # self.layers = nn.ModuleList(
-        # [InterModuleAttnLayer(self.d_model, self.d_att, self.d_att, config.h, config.d_ff, config.dropout) for _ in
-        # range(config.N)])
         self.layers = nn.ModuleList(
             [
                 InterModuleAttnLayer(
@@ -477,15 +476,10 @@ class Visual_Ling_Attn(nn.Module):
             ]
         )
         self.vis_fc = nn.Linear(
-            self.params.VB_input_dim, self.d_model
-        )  # nn.Linear(config.vis_in_features, self.d_model)
-        self.ins_fc = nn.Linear(512, self.d_model)
-        # self.ins_fc = nn.Linear(
-        #     self.params.L_input_dim + self.params.num_signals, self.d_model
-        # )  # nn.Linear(config.ins_in_features, self.d_model)
-        self.dropout = nn.Dropout(
-            p=self.params.T_dropout
-        )  # nn.Dropout(p=config.dropout)
+            self.params.VB_input_dim, self.d_model)
+
+        self.ins_fc = nn.Linear(self.params.L_input_dim + self.params.num_signals, self.d_model)
+        self.dropout = nn.Dropout(p=self.params.T_dropout)
         self.layer_norm = nn.LayerNorm(self.d_model)
 
     def forward(self, input, input_2, self_att_mask, enc_att_mask):
